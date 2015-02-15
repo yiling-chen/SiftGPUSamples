@@ -27,6 +27,8 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include <opencv2/features2d/features2d.hpp>
+#include <GL/glew.h>
 #include <stdlib.h>
 #include <vector>
 #include <iostream>
@@ -39,7 +41,6 @@ using namespace cv;
 
 int main()
 {
-    //this will use overloaded new operators
     SiftGPU *sift = new SiftGPU;
     SiftMatchGPU *matcher = new SiftMatchGPU(4096);
 
@@ -47,121 +48,64 @@ int main()
     vector<SiftGPU::SiftKeypoint> keys1(1), keys2(1);
     int num1 = 0, num2 = 0;
 
-    //process parameters
-    //The following parameters are default in V340
-    //-m,       up to 2 orientations for each feature (change to single orientation by using -m 1)
-    //-s        enable subpixel subscale (disable by using -s 0)
-
-
-    char * argv[] = {"-fo", "-1",  "-v", "1"};//
-    //-fo -1    staring from -1 octave
-    //-v 1      only print out # feature and overall time
-    //-loweo    add a (.5, .5) offset
-    //-tc <num> set a soft limit to number of detected features
-
-    //NEW:  parameters for  GPU-selection
-    //1. CUDA.                   Use parameter "-cuda", "[device_id]"
-    //2. OpenGL.				 Use "-Display", "display_name" to select monitor/GPU (XLIB/GLUT)
-    //   		                 on windows the display name would be something like \\.\DISPLAY4
-
-    //////////////////////////////////////////////////////////////////////////////////////
-    //You use CUDA for nVidia graphic cards by specifying
-    //-cuda   : cuda implementation (fastest for smaller images)
-    //          CUDA-implementation allows you to create multiple instances for multiple threads
-    //          Checkout src\TestWin\MultiThreadSIFT
-    /////////////////////////////////////////////////////////////////////////////////////
-
-    //////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////Two Important Parameters///////////////////////////
-    // First, texture reallocation happens when image size increases, and too many
-    // reallocation may lead to allocatoin failure.  You should be careful when using
-    // siftgpu on a set of images with VARYING imag sizes. It is recommended that you
-    // preset the allocation size to the largest width and largest height by using function
-    // AllocationPyramid or prameter '-p' (e.g. "-p", "1024x768").
-
-    // Second, there is a parameter you may not be aware of: the allowed maximum working
-    // dimension. All the SIFT octaves that needs a larger texture size will be skipped.
-    // The default prameter is 2560 for the unpacked implementation and 3200 for the packed.
-    // Those two default parameter is tuned to for 768MB of graphic memory. You should adjust
-    // it for your own GPU memory. You can also use this to keep/skip the small featuers.
-    // To change this, call function SetMaxDimension or use parameter "-maxd".
-    //
-    // NEW: by default SiftGPU will try to fit the cap of GPU memory, and reduce the working
-    // dimension so as to not allocate too much. This feature can be disabled by -nomc
-    //////////////////////////////////////////////////////////////////////////////////////
-
+    char * argv[] = {"-fo", "-1", "-v", "1"};//
 
     int argc = sizeof(argv)/sizeof(char*);
     sift->ParseParam(argc, argv);
 
-    ///////////////////////////////////////////////////////////////////////
-    //Only the following parameters can be changed after initialization (by calling ParseParam).
-    //-dw, -ofix, -ofix-not, -fo, -unn, -maxd, -b
-    //to change other parameters at runtime, you need to first unload the dynamically loaded libaray
-    //reload the libarary, then create a new siftgpu instance
-
-
-    //Create a context for computation, and SiftGPU will be initialized automatically
-    //The same context can be used by SiftMatchGPU
+    // Create a context for computation, and SiftGPU will be initialized automatically
+    // The same context can be used by SiftMatchGPU
     if(sift->CreateContextGL() != SiftGPU::SIFTGPU_FULL_SUPPORTED) return 0;
 
-    if(sift->RunSIFT("../data/800-1.jpg")) {
-        //Call SaveSIFT to save result to file, the format is the same as Lowe's
-        sift->SaveSIFT("../data/800-1.sift"); //Note that saving ASCII format is slow
+    Mat img1 = imread("../data/800-1.jpg", CV_LOAD_IMAGE_GRAYSCALE);
+    Mat img2 = imread("../data/640-1.jpg", CV_LOAD_IMAGE_GRAYSCALE);
+    unsigned char* data1 = (unsigned char*) img1.data;
+    unsigned char* data2 = (unsigned char*) img2.data;
 
-        //get feature count
+    if(sift->RunSIFT(img1.cols, img1.rows, data1, GL_LUMINANCE, GL_UNSIGNED_BYTE)) {
         num1 = sift->GetFeatureNum();
-
-        //allocate memory
         keys1.resize(num1);
         descriptors1.resize(128*num1);
-
-        //reading back feature vectors is faster than writing files
-        //if you dont need keys or descriptors, just put NULLs here
         sift->GetFeatureVector(&keys1[0], &descriptors1[0]);
-        //this can be used to write your own sift file.
     }
 
-    //You can have at most one OpenGL-based SiftGPU (per process).
-    //Normally, you should just create one, and reuse on all images.
-    if(sift->RunSIFT("../data/640-1.jpg")) {
-        sift->SaveSIFT("../data/640-1.sift");
+    if(sift->RunSIFT(img2.cols, img2.rows, data2, GL_LUMINANCE, GL_UNSIGNED_BYTE)) {
         num2 = sift->GetFeatureNum();
         keys2.resize(num2);
         descriptors2.resize(128*num2);
         sift->GetFeatureVector(&keys2[0], &descriptors2[0]);
     }
 
-    //Testing code to check how it works when image size varies
-    //sift->RunSIFT("../data/256.jpg");sift->SaveSIFT("../data/256.sift.1");
-    //sift->RunSIFT("../data/1024.jpg"); //this will result in pyramid reallocation
-    //sift->RunSIFT("../data/256.jpg"); sift->SaveSIFT("../data/256.sift.2");
-    //two sets of features for 256.jpg may have different order due to implementation
+    // Convert SiftGPU into OpenCV KeyPoint structures
+    vector<KeyPoint> kpList1;
+    vector<KeyPoint> kpList2;
+    kpList1.resize(num1);
+    kpList2.resize(num2);
 
-    //*************************************************************************
-    /////compute descriptors for user-specified keypoints (with or without orientations)
+    for (int i = 0; i < num1; i++) {
+        Point2f pt(keys1[i].x, keys1[i].y);
+        kpList1[i].pt = pt;
+        //kpList1[i].size = keys1[i].s;
+        //kpList1[i].angle = keys1[i].o;
+    }
 
-    //Method1, set new keypoints for the image you've just processed with siftgpu
-    //say vector<SiftGPU::SiftKeypoint> mykeys;
-    //sift->RunSIFT(mykeys.size(), &mykeys[0]);
-    //sift->RunSIFT(num2, &keys2[0], 1);         sift->SaveSIFT("../data/640-1.sift.2");
-    //sift->RunSIFT(num2, &keys2[0], 0);        sift->SaveSIFT("../data/640-1.sift.3");
+    for (int i = 0; i < num2; i++) {
+        Point2f pt(keys2[i].x, keys2[i].y);
+        kpList2[i].pt = pt;
+        //kpList2[i].size = keys2[i].s;
+        //kpList2[i].angle = keys2[i].o;
+    }
 
-    //Method2, set keypoints for the next coming image
-    //The difference of with method 1 is that method 1 skips gaussian filtering
-    //SiftGPU::SiftKeypoint mykeys[100];
-    //for(int i = 0; i < 100; ++i){
-    //    mykeys[i].s = 1.0f;mykeys[i].o = 0.0f;
-    //    mykeys[i].x = (i%10)*10.0f+50.0f;
-    //    mykeys[i].y = (i/10)*10.0f+50.0f;
-    //}
-    //sift->SetKeypointList(100, mykeys, 0);
-    //sift->RunSIFT("../data/800-1.jpg");                    sift->SaveSIFT("../data/800-1.sift.2");
-    //### for comparing with method1:
-    //sift->RunSIFT("../data/800-1.jpg");
-    //sift->RunSIFT(100, mykeys, 0);                          sift->SaveSIFT("../data/800-1.sift.3");
-    //*********************************************************************************
+    Mat img_keypoints_1;
+    Mat img_keypoints_2;
+    drawKeypoints( img1, kpList1, img_keypoints_1, Scalar::all(-1), DrawMatchesFlags::DEFAULT );
+    drawKeypoints( img2, kpList2, img_keypoints_2, Scalar::all(-1), DrawMatchesFlags::DEFAULT );
 
+    //-- Show detected (drawn) keypoints
+    imshow("Keypoints 1", img_keypoints_1 );
+    imshow("Keypoints 2", img_keypoints_2 );
+
+    waitKey(0);
 
     //**********************GPU SIFT MATCHING*********************************
     //**************************select shader language*************************
@@ -185,22 +129,23 @@ int main()
     int num_match = matcher->GetSiftMatch(num1, match_buf);
     std::cout << num_match << " sift matches were found;\n";
 
+    vector<DMatch> matches;
+    matches.resize(num_match);
+
     //enumerate all the feature matches
     for(int i  = 0; i < num_match; ++i) {
         //How to get the feature matches:
         //SiftGPU::SiftKeypoint & key1 = keys1[match_buf[i][0]];
         //SiftGPU::SiftKeypoint & key2 = keys2[match_buf[i][1]];
         //key1 in the first image matches with key2 in the second image
+        matches[i].queryIdx = match_buf[i][0];
+        matches[i].trainIdx = match_buf[i][1];
     }
 
-    //*****************GPU Guided SIFT MATCHING***************
-    //example: define a homography, and use default threshold 32 to search in a 64x64 window
-    //float h[3][3] = {{0.8f, 0, 0}, {0, 0.8f, 0}, {0, 0, 1.0f}};
-    //matcher->SetFeatureLocation(0, &keys1[0]); //SetFeatureLocaiton after SetDescriptors
-    //matcher->SetFeatureLocation(1, &keys2[0]);
-    //num_match = matcher->GetGuidedSiftMatch(num1, match_buf, h, NULL);
-    //std::cout << num_match << " guided sift matches were found;\n";
-    //if you can want to use a Fundamental matrix, check the function definition
+    Mat img_matches;
+    drawMatches(img1, kpList1, img2, kpList2, matches, img_matches);
+    imshow("matches", img_matches);
+    waitKey(0);
 
     // clean up..
     delete[] match_buf;
