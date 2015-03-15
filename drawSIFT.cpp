@@ -1,10 +1,10 @@
 ////////////////////////////////////////////////////////////////////////////
 //    File:        drawSIFT.cpp
 //    Author:      Yi-Ling Chen
-//    Description : A simple example shows how to use SiftGPU and SiftMatchGPU
+//    Description : A simple example shows how to draw SIFT keypoints by OpenCV
 //
 //
-//    Copyright (c) 2007 University of North Carolina at Chapel Hill
+//    Copyright (c) 2015 National Taiwan University
 //    All Rights Reserved
 //
 //    Permission to use, copy, modify and distribute this software and its
@@ -12,15 +12,11 @@
 //    fee, and without a written agreement is hereby granted, provided that the
 //    above copyright notice and the following paragraph appear in all copies.
 //
-//    The University of North Carolina at Chapel Hill make no representations
+//    The National Taiwan University make no representations
 //    about the suitability of this software for any purpose. It is provided
 //    'as is' without express or implied warranty.
 //
-//    Please send BUG REPORTS to ccwu@cs.unc.edu
-//
-//    ------------------------------------------------------------------
-//    This is a even simpler version of the original SimpleSIFT example.
-//    Removed all the platform dependent codes for the ease of reading.
+//    Please send BUG REPORTS to yiling.chen.ntu@gmail.com
 //
 ////////////////////////////////////////////////////////////////////////////
 
